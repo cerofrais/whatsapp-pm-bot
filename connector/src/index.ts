@@ -167,6 +167,27 @@ app.post('/send', requireSecret, async (req: Request, res: Response): Promise<vo
   }
 });
 
+// Returns all WhatsApp groups the bot account is currently a member of
+app.get('/groups', requireSecret, async (_req: Request, res: Response): Promise<void> => {
+  if (!sock || !isConnected) {
+    res.status(503).json({ error: 'WhatsApp not connected' });
+    return;
+  }
+  try {
+    const groups = await sock.groupFetchAllParticipating();
+    const list = Object.values(groups).map((g) => ({
+      jid: g.id,
+      name: g.subject,
+      participants: g.participants?.length ?? 0,
+    }));
+    list.sort((a, b) => a.name.localeCompare(b.name));
+    res.json({ count: list.length, groups: list });
+  } catch (err: any) {
+    logger.error({ err: err.message }, 'Failed to fetch groups');
+    res.status(500).json({ error: 'Failed to fetch groups' });
+  }
+});
+
 app.get('/health', (_req: Request, res: Response): void => {
   res.json({
     ok: true,
