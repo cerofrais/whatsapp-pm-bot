@@ -1,0 +1,430 @@
+{
+  "name": "WhatsApp Task Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-message",
+        "authentication": "none",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "d226c3af-3003-432b-9a2e-d764dbc5d5da",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        400
+      ],
+      "webhookId": "f67e594d-54ac-4048-a4fe-38fd89b34bba"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO messages (group_id, wa_message_id, sender_jid, sender_name, body, sent_at)\nSELECT\n  g.id,\n  '{{ $json.wa_message_id }}',\n  '{{ $json.sender_jid }}',\n  '{{ $json.sender_name }}',\n  '{{ $json.body }}',\n  '{{ $json.timestamp }}'::timestamptz\nFROM groups g\nWHERE g.wa_jid = '{{ $json.group_jid }}'\nON CONFLICT (group_id, wa_message_id) DO NOTHING\nRETURNING id;",
+        "options": {}
+      },
+      "id": "8647bbb4-95a3-4407-b84f-924d2cbd79a1",
+      "name": "Write raw message to Postgres",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        460,
+        400
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres - whatsapp_bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "a00b9d45-494e-4a37-ab3f-ac948e8e4410",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "26ad79ce-b0a9-45bc-b32b-dc4b9689819f",
+      "name": "Group registered?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        680,
+        400
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "a0aa3054-7063-4bab-aeff-a331714c7b21",
+      "name": "Stop - Group not registered",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        900,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/generate",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"gemma4:latest\",\n  \"stream\": false,\n  \"prompt\": \"You are a task extraction assistant. Given a WhatsApp group message, extract task information as JSON.\\n\\nMessage: {{ $('Webhook').item.json.body }}\\nSender: {{ $('Webhook').item.json.sender_name }}\\nToday's date: {{ $now.toISO() }}\\n\\nRespond ONLY with a JSON object matching this schema — no prose, no markdown:\\n{\\n  \\\"is_task\\\": boolean,\\n  \\\"task_text\\\": string | null,\\n  \\\"assignee\\\": string | null,\\n  \\\"due_date\\\": \\\"YYYY-MM-DD\\\" | null,\\n  \\\"confidence\\\": number\\n}\\n\\nRules:\\n- is_task=true only if there is a clear action item with an implicit or explicit owner\\n- confidence is 0.0–1.0, your certainty that this is a real task\\n- due_date: resolve relative dates (\\\"friday\\\", \\\"next week\\\") to absolute ISO dates\\n- assignee: the person responsible, often the person being asked\\n- If no task: {\\\"is_task\\\": false, \\\"task_text\\\": null, \\\"assignee\\\": null, \\\"due_date\\\": null, \\\"confidence\\\": 0}\"\n}",
+        "options": {}
+      },
+      "id": "b3946744-3a91-4b53-af56-7f28ba69a6a8",
+      "name": "Call Ollama - extract task",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const raw = $input.first().json.response;\n// Gemma sometimes wraps JSON in markdown code blocks\nconst match = raw.match(/```json\\s*([\\s\\S]*?)\\s*```/) || raw.match(/\\{[\\s\\S]*\\}/);\nconst jsonStr = match ? (match[1] || match[0]) : raw;\nreturn [{ json: JSON.parse(jsonStr.trim()) }];"
+      },
+      "id": "668b4e47-196a-4d97-9273-8fc890e748b1",
+      "name": "Parse Ollama response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "5f644a61-3c5c-452f-8b2b-52649d436728",
+              "leftValue": "={{ $json.is_task }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a7c5ef88-6722-452e-8eb7-3b2810226190",
+      "name": "Is task?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        280
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "69bdccee-28cb-48e6-8234-b5a957d7b5b6",
+      "name": "Stop - Not a task",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1560,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO tasks (\n  group_id, source_message_id, task_text,\n  assignee_raw, due_date, confidence, needs_review\n)\nSELECT\n  g.id,\n  m.id,\n  '{{ $json.task_text }}',\n  '{{ $json.assignee }}',\n  NULLIF('{{ $json.due_date }}', 'null')::date,\n  {{ $json.confidence }},\n  {{ $json.confidence }} < 0.70\nFROM groups g\nJOIN messages m ON m.wa_message_id = '{{ $('Webhook').item.json.wa_message_id }}'\n  AND m.group_id = g.id\nWHERE g.wa_jid = '{{ $('Webhook').item.json.group_jid }}'\nRETURNING id;",
+        "options": {}
+      },
+      "id": "87bcac46-e6a2-46a1-a6ec-41cb87e9e926",
+      "name": "Write task to Postgres",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1560,
+        160
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres - whatsapp_bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "aec91718-016b-442c-9c41-673ece079abf",
+              "leftValue": "={{ $('Webhook').item.json.body }}",
+              "rightValue": "@pmbot",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "2dc0b0c5-2f69-4660-a338-dd8dfe7f822e",
+      "name": "Is @mention?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1780,
+        160
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d6dbfe3c-0bcb-481a-9a6b-94dc9971073a",
+      "name": "Stop - Not a mention",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2000,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT t.task_text, t.assignee_raw, t.due_date, t.status\nFROM tasks t\nJOIN groups g ON g.id = t.group_id\nWHERE g.wa_jid = '{{ $('Webhook').item.json.group_jid }}'\n  AND t.status IN ('open', 'overdue')\nORDER BY t.due_date ASC NULLS LAST\nLIMIT 20;",
+        "options": {}
+      },
+      "id": "d52b702d-567e-4576-b300-58043fb2474c",
+      "name": "Query open tasks for group",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2000,
+        40
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres - whatsapp_bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const tasks = $input.all().map(t => t.json);\nif (tasks.length === 0) {\n  return [{ json: { text: 'No open tasks for this group.' } }];\n}\nconst lines = tasks.map((t, i) => {\n  const due = t.due_date ? ` — due ${new Date(t.due_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : '';\n  const who = t.assignee_raw ? ` (${t.assignee_raw})` : '';\n  return `${i + 1}. ${t.task_text}${who}${due}`;\n});\nreturn [{ json: { text: `Open tasks:\\n${lines.join('\\n')}` } }];"
+      },
+      "id": "0fdbd250-a0a0-40d5-965f-ee029f3ffe3d",
+      "name": "Format reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2220,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:3002/send",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-connector-secret",
+              "value": "={{ $env.CONNECTOR_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"to\": \"{{ $('Webhook').item.json.group_jid }}\",\n  \"text\": \"{{ $json.text }}\"\n}",
+        "options": {}
+      },
+      "id": "bf215c9a-e434-476f-9dfc-b682116491d8",
+      "name": "Send reply via connector",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2440,
+        40
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Write raw message to Postgres",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write raw message to Postgres": {
+      "main": [
+        [
+          {
+            "node": "Group registered?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Group registered?": {
+      "main": [
+        [
+          {
+            "node": "Call Ollama - extract task",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Is @mention?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Stop - Group not registered",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Ollama - extract task": {
+      "main": [
+        [
+          {
+            "node": "Parse Ollama response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Ollama response": {
+      "main": [
+        [
+          {
+            "node": "Is task?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is task?": {
+      "main": [
+        [
+          {
+            "node": "Write task to Postgres",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Stop - Not a task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write task to Postgres": {
+      "main": [[]]
+    },
+    "Is @mention?": {
+      "main": [
+        [
+          {
+            "node": "Query open tasks for group",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Stop - Not a mention",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query open tasks for group": {
+      "main": [
+        [
+          {
+            "node": "Format reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format reply": {
+      "main": [
+        [
+          {
+            "node": "Send reply via connector",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "versionId": "256dae06-b086-40ea-8a66-ed73a8aabc95",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
