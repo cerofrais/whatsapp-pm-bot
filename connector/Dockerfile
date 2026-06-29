@@ -1,7 +1,8 @@
 FROM node:20-alpine AS deps
 WORKDIR /app
+RUN apk add --no-cache git python3 make g++
 COPY package.json ./
-RUN npm install --frozen-lockfile 2>/dev/null || npm install
+RUN npm install
 
 FROM deps AS builder
 COPY tsconfig.json ./

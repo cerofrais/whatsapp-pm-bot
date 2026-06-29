@@ -3,7 +3,6 @@ import makeWASocket, {
   DisconnectReason,
   fetchLatestBaileysVersion,
   isJidGroup,
-  makeInMemoryStore,
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import express, { Request, Response, NextFunction } from 'express';
@@ -45,8 +44,6 @@ async function connectToWhatsApp(): Promise<void> {
     logger.warn('Could not fetch latest version, using fallback');
   }
 
-  const store = makeInMemoryStore({ logger: logger.child({ module: 'store' }) as any });
-
   sock = makeWASocket({
     version,
     auth: state,
@@ -57,7 +54,6 @@ async function connectToWhatsApp(): Promise<void> {
     generateHighQualityLinkPreview: false,
   });
 
-  store.bind(sock.ev);
   sock.ev.on('creds.update', saveCreds);
 
   sock.ev.on('connection.update', (update) => {
@@ -158,6 +154,7 @@ app.post('/send', requireSecret, async (req: Request, res: Response): Promise<vo
     return;
   }
   try {
+    // Small random delay — behave like a human
     await new Promise((r) => setTimeout(r, 800 + Math.random() * 1500));
     await sock.sendMessage(to, { text });
     logger.info({ to }, 'Sent message');
