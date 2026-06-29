@@ -24,32 +24,27 @@ export default async function DashboardPage() {
     [tasks, stats] = await Promise.all([getTasksWithContext(), getStats()]);
   } catch {
     return (
-      <main className="min-h-screen p-8">
-        <p className="text-red-600">Could not connect to database. Check your DATABASE_URL.</p>
-      </main>
+      <p className="text-red-600">Could not connect to database. Check your DATABASE_URL.</p>
     );
   }
 
-  // Group tasks by client name
   const byClient = tasks.reduce<Record<string, Task[]>>((acc, t) => {
     (acc[t.client_name] ??= []).push(t);
     return acc;
   }, {});
 
   return (
-    <main className="min-h-screen p-6 lg:p-10">
-      {/* Header */}
+    <>
       <div className="mb-8 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">WhatsApp PM Bot</h1>
-          <p className="text-sm text-gray-500">Client task tracker — auto-extracted from group chats</p>
+          <h1 className="text-2xl font-bold text-gray-900">Task Board</h1>
+          <p className="text-sm text-gray-500">Auto-extracted from group chats</p>
         </div>
         <span className="text-xs text-gray-400">
           {new Date().toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}
         </span>
       </div>
 
-      {/* Stats */}
       <div className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-4">
         <StatCard label="Total tasks" value={stats.total} />
         <StatCard label="Open" value={stats.open} />
@@ -57,11 +52,10 @@ export default async function DashboardPage() {
         <StatCard label="Needs review" value={stats.needs_review} highlight={stats.needs_review > 0 ? 'amber' : undefined} />
       </div>
 
-      {/* Per-client boards */}
       {Object.keys(byClient).length === 0 ? (
         <div className="rounded-lg border border-dashed border-gray-300 p-12 text-center text-gray-400">
           <p className="text-lg font-medium">No tasks yet</p>
-          <p className="mt-1 text-sm">Tasks will appear here once the connector is running and n8n starts extracting them from WhatsApp messages.</p>
+          <p className="mt-1 text-sm">Tasks appear here once the connector is running and n8n extracts them from WhatsApp messages.</p>
         </div>
       ) : (
         <div className="space-y-10">
@@ -76,22 +70,16 @@ export default async function DashboardPage() {
                     {open.length} open
                   </span>
                 </div>
-
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {open.map((t) => (
-                    <TaskCard key={t.id} task={t} />
-                  ))}
+                  {open.map((t) => <TaskCard key={t.id} task={t} />)}
                 </div>
-
                 {closed.length > 0 && (
                   <details className="mt-3">
                     <summary className="cursor-pointer text-xs text-gray-400 hover:text-gray-600">
                       {closed.length} closed task{closed.length !== 1 ? 's' : ''}
                     </summary>
                     <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                      {closed.map((t) => (
-                        <TaskCard key={t.id} task={t} />
-                      ))}
+                      {closed.map((t) => <TaskCard key={t.id} task={t} />)}
                     </div>
                   </details>
                 )}
@@ -100,6 +88,6 @@ export default async function DashboardPage() {
           })}
         </div>
       )}
-    </main>
+    </>
   );
 }

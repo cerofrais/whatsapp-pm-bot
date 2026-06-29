@@ -63,6 +63,41 @@ export async function getTasksWithContext(): Promise<Task[]> {
   return result.rows;
 }
 
+export interface GroupWithClient extends Group {
+  client_name: string;
+  task_count: number;
+}
+
+export async function getClients(): Promise<(Client & { group_count: number; open_task_count: number })[]> {
+  const result = await pool.query(`
+    SELECT
+      c.id, c.name, c.status, c.created_at,
+      COUNT(DISTINCT g.id)::int                                      AS group_count,
+      COUNT(t.id) FILTER (WHERE t.status IN ('open','overdue'))::int AS open_task_count
+    FROM clients c
+    LEFT JOIN groups g  ON g.client_id = c.id
+    LEFT JOIN tasks  t  ON t.group_id  = g.id
+    GROUP BY c.id
+    ORDER BY c.status = 'active' DESC, c.name
+  `);
+  return result.rows;
+}
+
+export async function getGroupsWithClient(): Promise<GroupWithClient[]> {
+  const result = await pool.query<GroupWithClient>(`
+    SELECT
+      g.id, g.client_id, g.wa_jid, g.name, g.joined_at,
+      c.name AS client_name,
+      COUNT(t.id) FILTER (WHERE t.status IN ('open','overdue'))::int AS task_count
+    FROM groups g
+    JOIN clients c ON c.id = g.client_id
+    LEFT JOIN tasks t ON t.group_id = g.id
+    GROUP BY g.id, c.name
+    ORDER BY c.name, g.name
+  `);
+  return result.rows;
+}
+
 export async function getStats(): Promise<{
   total: number;
   open: number;
