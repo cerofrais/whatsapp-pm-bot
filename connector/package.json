@@ -14,7 +14,8 @@
     "express": "^4.21.2",
     "pg": "^8.13.1",
     "pino": "^9.6.0",
-    "pino-pretty": "^13.0.0"
+    "pino-pretty": "^13.0.0",
+    "qrcode-terminal": "^0.12.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",

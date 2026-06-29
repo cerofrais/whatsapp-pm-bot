@@ -9,6 +9,8 @@ import express, { Request, Response, NextFunction } from 'express';
 import axios from 'axios';
 import pino from 'pino';
 import path from 'path';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const qrcode = require('qrcode-terminal') as { generate: (qr: string, opts: { small: boolean }) => void };
 
 const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
@@ -47,7 +49,6 @@ async function connectToWhatsApp(): Promise<void> {
   sock = makeWASocket({
     version,
     auth: state,
-    printQRInTerminal: true,
     logger: logger.child({ module: 'baileys' }) as any,
     markOnlineOnConnect: false,
     syncFullHistory: false,
@@ -60,7 +61,8 @@ async function connectToWhatsApp(): Promise<void> {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
-      logger.info('QR code ready — run: docker logs -f wabot-connector');
+      logger.info('Scan the QR code below to link your WhatsApp number:');
+      qrcode.generate(qr, { small: true });
     }
 
     if (connection === 'close') {
