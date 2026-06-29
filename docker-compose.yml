@@ -1,0 +1,79 @@
+version: '3.8'
+
+# Isolated network — no conflicts with tre-crm_tre or n8n_default
+networks:
+  whatsapp-bot:
+    name: whatsapp-bot
+    driver: bridge
+
+volumes:
+  wabot_postgres_data:
+  wabot_connector_auth:
+
+services:
+  # ─────────────────────────── Postgres 16 ─────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: wabot-postgres
+    ports:
+      - "5433:5432"      # 5432 already used by tre-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - wabot_postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - whatsapp-bot
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────── WhatsApp Connector ───────────────────────────────────
+  connector:
+    build:
+      context: ./connector
+      dockerfile: Dockerfile
+    container_name: wabot-connector
+    ports:
+      - "${CONNECTOR_PORT:-3002}:3002"
+    environment:
+      CONNECTOR_PORT: "3002"
+      CONNECTOR_SECRET: ${CONNECTOR_SECRET}
+      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      LOG_LEVEL: info
+    volumes:
+      - wabot_connector_auth:/app/auth
+    networks:
+      - whatsapp-bot
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ─────────────────────────── Dashboard ───────────────────────────────────────
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: wabot-dashboard
+    ports:
+      - "${DASHBOARD_HOST_PORT:-3001}:3000"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      CONNECTOR_URL: http://connector:3002
+      CONNECTOR_SECRET: ${CONNECTOR_SECRET}
+      NODE_ENV: production
+    networks:
+      - whatsapp-bot
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped

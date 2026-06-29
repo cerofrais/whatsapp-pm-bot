@@ -1,0 +1,7 @@
+.env
+node_modules/
+connector/auth/
+connector/dist/
+dashboard/.next/
+dashboard/node_modules/
+*.log
