@@ -1,82 +1,45 @@
 # Manual Tasks
 
-These are the one-time and ongoing manual steps you need to do that can't be automated.
+Steps that require human action — either one-time setup or occasional maintenance.
 
 ---
 
 ## 1. Connect the WhatsApp bot number (one-time)
 
-You need a **dedicated phone number** that is NOT your personal WhatsApp number. The bot will be linked to this number as a "linked device."
+You need a **dedicated phone number** — not your personal WhatsApp.
 
-1. Insert the SIM into a phone (or use a virtual number if you have one)
-2. Open WhatsApp, set it up for that number
-3. Run `docker logs -f wabot-connector` and scan the QR code from WhatsApp:
-   - Settings → Linked Devices → Link a Device
+1. Insert the SIM into a phone and set up WhatsApp on it
+2. Run: `docker logs -f wabot-connector`
+3. A QR code prints — scan it from that phone: Settings → Linked Devices → Link a Device
 
-Auth is saved in the Docker volume `wabot_connector_auth`. You won't need to re-scan unless the session is explicitly revoked.
+Auth is saved in the `wabot_connector_auth` Docker volume. No re-scan needed on restart unless the session is explicitly revoked.
 
 ---
 
 ## 2. Add the bot to each client group
 
-On the dedicated bot phone (or from another group admin's phone):
+From the dedicated bot phone (or any group admin's phone):
 
-1. Open the client WhatsApp group
+1. Open the WhatsApp group
 2. Group Info → Add Participant → add the bot number
 
-The connector will automatically start receiving and forwarding messages from that group. But the group must also be registered in the database (step 3) for the dashboard to show its tasks.
+The connector will start receiving messages from that group immediately. You still need to register the group in the dashboard (step 3) for tasks to appear.
 
 ---
 
-## 3. Register clients and groups in the database
+## 3. Register clients and groups (via dashboard)
 
-Connect to Postgres directly:
+**Clients:** go to **http://localhost:3001/clients** → type the client name → Add.
 
-```bash
-# Interactive psql
-docker exec -it wabot-postgres psql -U wabot -d whatsapp_bot
+**Groups:**
+1. Send any message in the group (so the JID shows up in connector logs)
+2. Run: `docker logs wabot-connector 2>&1 | grep group_jid` — copy the JID (looks like `120363xxxxxxxxxx@g.us`)
+3. Go to **http://localhost:3001/groups** → select the client, paste the JID, give it a label → Register
 
-# Or run a one-liner
-docker exec wabot-postgres psql -U wabot -d whatsapp_bot -c "SELECT * FROM clients;"
-```
+A client can have multiple groups (e.g. dev group + design group — register them separately).
 
-### Add a client
-
-```sql
-INSERT INTO clients (name) VALUES ('Acme Corp');
-```
-
-### Find the group JID
-
-The group JID appears in the connector logs when the first message arrives:
-
-```bash
-docker logs wabot-connector 2>&1 | grep "group_jid"
-```
-
-It looks like `120363xxxxxxxxxx@g.us`.
-
-### Register the group
-
-```sql
-INSERT INTO groups (client_id, wa_jid, name)
-VALUES (
-  (SELECT id FROM clients WHERE name = 'Acme Corp'),
-  '120363xxxxxxxxxx@g.us',
-  'Acme - Main Group'
-);
-```
-
-A client can have multiple groups (e.g. one for dev, one for design):
-
-```sql
-INSERT INTO groups (client_id, wa_jid, name)
-VALUES (
-  (SELECT id FROM clients WHERE name = 'Acme Corp'),
-  '120363yyyyyyyyyy@g.us',
-  'Acme - Design Group'
-);
-```
+To archive a client so their tasks disappear from the board: **Clients page** → Archive. Reactivate the same way.
+To remove a group: **Groups page** → Remove (tasks are kept, group just stops feeding new data).
 
 ---
 
@@ -85,66 +48,58 @@ VALUES (
 See `docs/n8n-workflow.md` for the full step-by-step.
 
 Short version:
-1. Create a new workflow in n8n (http://localhost:5678)
+1. Open n8n at http://localhost:5678 → create a new workflow
 2. Add a **Webhook** trigger node — copy its production URL into `N8N_WEBHOOK_URL` in `.env`
 3. Restart the connector: `docker compose restart connector`
-4. Build the extraction and task-writing logic per the guide
+4. Build the extraction pipeline per the guide
 
 ---
 
 ## 5. Tune the extraction confidence threshold
 
-After the first batch of real messages, check how many tasks are flagged `needs_review`:
+After the first batch of real messages, check how many tasks are being flagged for review:
 
-```sql
-SELECT
-  COUNT(*) FILTER (WHERE needs_review = true) AS flagged,
-  COUNT(*)                                    AS total,
-  AVG(confidence)                             AS avg_confidence
-FROM tasks;
+```bash
+docker exec wabot-postgres psql -U wabot -d whatsapp_bot -c "
+  SELECT
+    COUNT(*) FILTER (WHERE needs_review = true) AS flagged,
+    COUNT(*)                                    AS total,
+    ROUND(AVG(confidence), 2)                   AS avg_confidence
+  FROM tasks;
+"
 ```
 
-If too many real tasks are being flagged, raise the `confidence` threshold in your n8n workflow logic (currently `0.70`). If too many bad extractions are slipping through unflagged, lower it. Update `CONFIDENCE_THRESHOLD` in `.env` for documentation — the actual threshold is in the n8n workflow IF condition.
+- Too many good tasks flagged → raise the threshold in the n8n IF node (currently `0.70`)
+- Too many bad extractions slipping through → lower it
+- Update `CONFIDENCE_THRESHOLD` in `.env` to document your chosen value
 
 ---
 
-## 6. Mark a task done from the dashboard
+## 6. Mark a task done
 
-On the dashboard (http://localhost:3001), each open task has a **Mark done** and **Cancel** button. Clicking updates the status immediately.
+Use the **Mark done** / **Cancel** buttons on the task board at http://localhost:3001.
 
-You can also do it directly in SQL:
-
-```sql
-UPDATE tasks SET status = 'done', updated_at = now()
-WHERE id = '<task-uuid>';
-```
-
----
-
-## 7. Archive a client engagement
-
-When a project ends, archive the client so their tasks stop appearing on the main board:
-
-```sql
-UPDATE clients SET status = 'archived' WHERE name = 'Acme Corp';
-```
-
-To reactivate:
-
-```sql
-UPDATE clients SET status = 'active' WHERE name = 'Acme Corp';
+Via SQL if needed:
+```bash
+docker exec wabot-postgres psql -U wabot -d whatsapp_bot -c "
+  UPDATE tasks SET status = 'done', updated_at = now() WHERE id = '<uuid>';
+"
 ```
 
 ---
 
-## 8. Correct a bad extraction
+## 7. Correct a bad extraction
 
-If a task was extracted with the wrong assignee or due date, update it directly:
+If a task has the wrong assignee, due date, or description, edit it directly in Postgres:
+
+```bash
+docker exec -it wabot-postgres psql -U wabot -d whatsapp_bot
+```
 
 ```sql
 UPDATE tasks
 SET
-  task_text    = 'Updated task description',
+  task_text    = 'Correct description here',
   assignee_raw = 'Harsha',
   due_date     = '2026-07-15',
   needs_review = false,
@@ -152,9 +107,14 @@ SET
 WHERE id = '<task-uuid>';
 ```
 
+To find the task UUID: on the task board, open browser DevTools → Network → find the `/api/tasks` call, or query:
+```sql
+SELECT id, task_text, assignee_raw, due_date FROM tasks WHERE status = 'open' ORDER BY created_at DESC LIMIT 20;
+```
+
 ---
 
-## 9. Backup and restore Postgres
+## 8. Backup and restore Postgres
 
 **Backup:**
 ```bash
@@ -168,12 +128,12 @@ docker exec -i wabot-postgres psql -U wabot -d whatsapp_bot < backup_20260629.sq
 
 ---
 
-## 10. Swap to backup WhatsApp number (if primary gets banned)
+## 9. Swap to a backup WhatsApp number (if primary gets banned)
 
-There's no automated failover — WhatsApp unofficial clients can get flagged.
+There's no automated failover — unofficial WhatsApp clients can get flagged.
 
-1. Stop the connector: `docker compose stop connector`
-2. Delete the auth volume: `docker volume rm whatsapp-bot_wabot_connector_auth`
-3. Get a backup number, install WhatsApp on a phone
-4. Start the connector and scan the new QR: `docker compose up -d connector && docker logs -f wabot-connector`
-5. Re-add the new number to each client group manually (a group admin must do this)
+1. `docker compose stop connector`
+2. `docker volume rm whatsapp-bot_wabot_connector_auth`
+3. Set up WhatsApp on a new phone with the backup number
+4. `docker compose up -d connector && docker logs -f wabot-connector` — scan the new QR
+5. Re-add the new number to every client group (a group admin must do this manually)
