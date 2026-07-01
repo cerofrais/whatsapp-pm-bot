@@ -22,7 +22,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO messages (group_id, wa_message_id, sender_jid, sender_name, body, sent_at)\nSELECT\n  g.id,\n  '{{ $json.wa_message_id }}',\n  '{{ $json.sender_jid }}',\n  '{{ $json.sender_name }}',\n  '{{ $json.body }}',\n  '{{ $json.timestamp }}'::timestamptz\nFROM groups g\nWHERE g.wa_jid = '{{ $json.group_jid }}'\nON CONFLICT (group_id, wa_message_id) DO NOTHING\nRETURNING id;",
+        "query": "INSERT INTO messages (group_id, wa_message_id, sender_jid, sender_name, body, sent_at)\nSELECT\n  g.id,\n  '{{ $json.body.wa_message_id }}',\n  '{{ $json.body.sender_jid }}',\n  '{{ $json.body.sender_name }}',\n  $body_text${{ $json.body.body }}$body_text$,\n  '{{ $json.body.timestamp }}'::timestamptz\nFROM groups g\nWHERE g.wa_jid = '{{ $json.body.group_jid }}'\nON CONFLICT (group_id, wa_message_id) DO NOTHING\nRETURNING id;",
         "options": {}
       },
       "id": "8647bbb4-95a3-4407-b84f-924d2cbd79a1",
@@ -90,7 +90,7 @@
         "sendBody": true,
         "contentType": "json",
         "specifyBody": "json",
-        "jsonBody": "={\n  \"model\": \"gemma4:latest\",\n  \"stream\": false,\n  \"prompt\": \"You are a task extraction assistant. Given a WhatsApp group message, extract task information as JSON.\\n\\nMessage: {{ $('Webhook').item.json.body }}\\nSender: {{ $('Webhook').item.json.sender_name }}\\nToday's date: {{ $now.toISO() }}\\n\\nRespond ONLY with a JSON object matching this schema — no prose, no markdown:\\n{\\n  \\\"is_task\\\": boolean,\\n  \\\"task_text\\\": string | null,\\n  \\\"assignee\\\": string | null,\\n  \\\"due_date\\\": \\\"YYYY-MM-DD\\\" | null,\\n  \\\"confidence\\\": number\\n}\\n\\nRules:\\n- is_task=true only if there is a clear action item with an implicit or explicit owner\\n- confidence is 0.0–1.0, your certainty that this is a real task\\n- due_date: resolve relative dates (\\\"friday\\\", \\\"next week\\\") to absolute ISO dates\\n- assignee: the person responsible, often the person being asked\\n- If no task: {\\\"is_task\\\": false, \\\"task_text\\\": null, \\\"assignee\\\": null, \\\"due_date\\\": null, \\\"confidence\\\": 0}\"\n}",
+        "jsonBody": "={\n  \"model\": \"gemma4:latest\",\n  \"stream\": false,\n  \"prompt\": \"You are a task extraction assistant. Given a WhatsApp group message, extract task information as JSON.\\n\\nMessage: {{ $('Webhook').item.json.body.body }}\\nSender: {{ $('Webhook').item.json.body.sender_name }}\\nToday's date: {{ $now.toISO() }}\\n\\nRespond ONLY with a JSON object matching this schema — no prose, no markdown:\\n{\\n  \\\"is_task\\\": boolean,\\n  \\\"task_text\\\": string | null,\\n  \\\"assignee\\\": string | null,\\n  \\\"due_date\\\": \\\"YYYY-MM-DD\\\" | null,\\n  \\\"confidence\\\": number\\n}\\n\\nRules:\\n- is_task=true only if there is a clear action item with an implicit or explicit owner\\n- confidence is 0.0–1.0, your certainty that this is a real task\\n- due_date: resolve relative dates (\\\"friday\\\", \\\"next week\\\") to absolute ISO dates\\n- assignee: the person responsible, often the person being asked\\n- If no task: {\\\"is_task\\\": false, \\\"task_text\\\": null, \\\"assignee\\\": null, \\\"due_date\\\": null, \\\"confidence\\\": 0}\"\n}",
         "options": {}
       },
       "id": "b3946744-3a91-4b53-af56-7f28ba69a6a8",
@@ -162,7 +162,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO tasks (\n  group_id, source_message_id, task_text,\n  assignee_raw, due_date, confidence, needs_review\n)\nSELECT\n  g.id,\n  m.id,\n  '{{ $json.task_text }}',\n  '{{ $json.assignee }}',\n  NULLIF('{{ $json.due_date }}', 'null')::date,\n  {{ $json.confidence }},\n  {{ $json.confidence }} < 0.70\nFROM groups g\nJOIN messages m ON m.wa_message_id = '{{ $('Webhook').item.json.wa_message_id }}'\n  AND m.group_id = g.id\nWHERE g.wa_jid = '{{ $('Webhook').item.json.group_jid }}'\nRETURNING id;",
+        "query": "INSERT INTO tasks (\n  group_id, source_message_id, task_text,\n  assignee_raw, due_date, confidence, needs_review\n)\nSELECT\n  g.id,\n  m.id,\n  $task_text${{ $json.task_text }}$task_text$,\n  $assignee${{ $json.assignee }}$assignee$,\n  NULLIF('{{ $json.due_date }}', 'null')::date,\n  {{ $json.confidence }},\n  {{ $json.confidence }} < 0.70\nFROM groups g\nJOIN messages m ON m.wa_message_id = '{{ $('Webhook').item.json.body.wa_message_id }}'\n  AND m.group_id = g.id\nWHERE g.wa_jid = '{{ $('Webhook').item.json.body.group_jid }}'\nRETURNING id;",
         "options": {}
       },
       "id": "87bcac46-e6a2-46a1-a6ec-41cb87e9e926",
@@ -192,7 +192,7 @@
           "conditions": [
             {
               "id": "aec91718-016b-442c-9c41-673ece079abf",
-              "leftValue": "={{ $('Webhook').item.json.body }}",
+              "leftValue": "={{ $('Webhook').item.json.body.body }}",
               "rightValue": "@pmbot",
               "operator": {
                 "type": "string",
@@ -226,7 +226,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT t.task_text, t.assignee_raw, t.due_date, t.status\nFROM tasks t\nJOIN groups g ON g.id = t.group_id\nWHERE g.wa_jid = '{{ $('Webhook').item.json.group_jid }}'\n  AND t.status IN ('open', 'overdue')\nORDER BY t.due_date ASC NULLS LAST\nLIMIT 20;",
+        "query": "SELECT t.task_text, t.assignee_raw, t.due_date, t.status\nFROM tasks t\nJOIN groups g ON g.id = t.group_id\nWHERE g.wa_jid = '{{ $('Webhook').item.json.body.group_jid }}'\n  AND t.status IN ('open', 'overdue')\nORDER BY t.due_date ASC NULLS LAST\nLIMIT 20;",
         "options": {}
       },
       "id": "d52b702d-567e-4576-b300-58043fb2474c",
@@ -274,7 +274,7 @@
         "sendBody": true,
         "contentType": "json",
         "specifyBody": "json",
-        "jsonBody": "={\n  \"to\": \"{{ $('Webhook').item.json.group_jid }}\",\n  \"text\": \"{{ $json.text }}\"\n}",
+        "jsonBody": "={\n  \"to\": \"{{ $('Webhook').item.json.body.group_jid }}\",\n  \"text\": \"{{ $json.text }}\"\n}",
         "options": {}
       },
       "id": "bf215c9a-e434-476f-9dfc-b682116491d8",

@@ -46,7 +46,7 @@ services:
       CONNECTOR_SECRET: ${CONNECTOR_SECRET}
       N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL}
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      LOG_LEVEL: info
+      LOG_LEVEL: debug
     volumes:
       - wabot_connector_auth:/app/auth
     networks:

@@ -87,10 +87,15 @@ async function connectToWhatsApp(): Promise<void> {
   });
 
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    if (type !== 'notify') return;
+    logger.info({ type, count: messages.length }, 'messages.upsert received');
+
+    // Accept notify (new messages) and append (some Baileys versions use this for live messages)
+    if (type !== 'notify' && type !== 'append') return;
 
     for (const msg of messages) {
       const jid = msg.key.remoteJid;
+      logger.info({ type, jid, fromMe: msg.key.fromMe, hasMessage: !!msg.message }, 'processing message');
+
       if (!jid || !isJidGroup(jid)) continue;
       if (msg.key.fromMe) continue;
 
